@@ -123,12 +123,25 @@ python3 -I 脚本/05_网页数据.py
 
 改了脚本或数据以后，依次重新运行 01～05，网页会自动用新的 `数据.js`。
 
+## 发布与更新
+
+| 地方 | 网址 | 怎么更新 |
+|---|---|---|
+| GitHub Pages | https://zhouqingni.github.io/bible-people-map/ | 把改动推送到 GitHub（`git push`），约 1 分钟后自动更新（`.github/workflows/pages.yml`） |
+| Cloudflare | https://bible-people-map.zhouqingni.workers.dev | 运行 `bash 脚本/发布到Cloudflare.sh`（设置在 `wrangler.jsonc`；第一次要先 `npx --yes wrangler@4 login`） |
+
+- 仓库：https://github.com/zhouqingni/bible-people-map （公开）。下载的原始数据（`数据源/`）不上传。
+- 提交记录的作者邮箱用 GitHub 的隐私地址（noreply），不暴露本机信息。
+- Cloudflare 现在把"Pages"并入 Workers，所以网址是 `.workers.dev` 而不是 `.pages.dev`，免费额度相同。
+- 两个网址在中国大陆都可能打不开或很慢。
+
 ## 下一步
 
 - [x] 把全本人物和关系（亲属、社会、同节共现）整理成全本数据（2026-11-21）
 - [ ] 抽查 `数据/人名核对表.csv`，修正错名
 - [x] 补全本社会关系：人工补充 128 条 + 经文句式自动提取（2026-11-21）
 - [x] 底部加中国史、世界史两条时间轨道（2026-11-21）
+- [x] 发布到 GitHub Pages 和 Cloudflare（2026-11-21）
 - [ ] 继续扩充 `补充关系.tsv`：先知书、士师记、列王纪里次要人物的关系仍然偏少
 - [x] 给每个人定时期或年代，并加上"同一事件"关系线（2026-11-21）
 - [x] 事件标题翻成中文（501 个，2026-11-21）
