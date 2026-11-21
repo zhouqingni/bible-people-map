@@ -71,6 +71,12 @@
     display: none; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); font-family: "Songti SC", "STSong", serif; }
   #verse b { display: block; font-family: -apple-system, "PingFang SC", sans-serif; font-size: 13px; color: #8a6d2f; margin-bottom: 4px; }
 
+  #about { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100% - 32px)); max-height: 80%;
+    overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; z-index: 10; display: none;
+    font-size: 14px; line-height: 1.7; }
+  #about h2 { margin: 0 0 8px; font-size: 18px; } #about h3 { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 500; }
+  #about ul { margin: 0; padding-left: 18px; } #about a { color: #9cc9ff; }
+  #aboutClose { position: absolute; top: 8px; right: 12px; background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; }
   #tip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     padding: 4px 8px; font-size: 13px; z-index: 8; display: none; white-space: nowrap; }
   footer { position: fixed; left: 16px; bottom: 42px; font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
@@ -98,10 +104,29 @@
   <button class="plain on" id="laneCN" title="底部显示中国朝代与君王">中国史</button>
   <button class="plain on" id="laneWD" title="底部显示世界历史的时期与大事">世界史</button>
   <button class="plain" id="reset">全图</button>
+  <button class="plain" id="aboutBtn">出处</button>
 </header>
 
 <div id="panel"><button id="close" aria-label="关闭">×</button><div id="card"></div></div>
 <div id="verse"></div>
+<div id="about">
+  <button id="aboutClose" aria-label="关闭">×</button>
+  <h2>关于这张图</h2>
+  <p>圣经人物关系星图：横向是时间，纵向按人物关系聚集；金色主线是马太福音、路加福音记载的耶稣家谱。底部是同时期的中国史和世界史。</p>
+  <h3>数据来源</h3>
+  <ul>
+    <li>经文与人名：和合本（eBible.org，cmn-cu89s，标为公版）</li>
+    <li>人物与关系：<a href="https://github.com/BradyStephenson/bible-data" target="_blank" rel="noopener">BibleData</a>（Brady Stephenson，CC BY 4.0）</li>
+    <li>年代与事件：<a href="https://github.com/robertrouse/theographic-bible-metadata" target="_blank" rel="noopener">Theographic Bible Metadata</a>（Robert Rouse，CC BY-SA 4.0）</li>
+    <li>中文人名对照、关系补充、事件标题翻译、中国史与世界史年表：本项目整理</li>
+  </ul>
+  <h3>说明</h3>
+  <ul>
+    <li>圣经年代为大约值（乌雪年表系），只用来排先后；历史轨道用世俗史学年代，两者不完全一致。</li>
+    <li>部分中文名、关系是程序推断的，资料卡里会标出"可能有误"。每条关系都附经文，可以自行核对。</li>
+    <li>本图的整理数据依 CC BY-SA 4.0 授权分享。</li>
+  </ul>
+</div>
 <div id="tip"></div>
 <footer id="foot"></footer>
 
@@ -666,6 +691,9 @@
   const depthBtn = document.getElementById("depth");
   depthBtn.onclick = () => { depth = depth === 1 ? 2 : 1; depthBtn.textContent = depth === 1 ? "关系：一层" : "关系：两层"; depthBtn.classList.toggle("on", depth === 2); computeLit(); draw(); };
   document.getElementById("reset").onclick = () => { select(null); fit(); draw(); };
+  const about = document.getElementById("about");
+  document.getElementById("aboutBtn").onclick = () => { about.style.display = about.style.display === "block" ? "none" : "block"; };
+  document.getElementById("aboutClose").onclick = () => { about.style.display = "none"; };
   [["laneCN", 0], ["laneWD", 1]].forEach(([id, n]) => {
     const b = document.getElementById(id);
     b.onclick = () => { LANES[n].on = !LANES[n].on; b.classList.toggle("on", LANES[n].on); placeFooter(); draw(); };
