@@ -15,13 +15,18 @@
 运行：python3 -I 脚本/03_全本关系.py
 """
 import csv
+import glob
 import json
 import os
+import re
 from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BD = os.path.join(ROOT, "数据源", "bibledata")
 OUT = os.path.join(ROOT, "数据")
+USFM = os.path.join(ROOT, "数据源", "和合本", "usfm")
+NAMES = os.path.join(ROOT, "脚本", "对照表", "同名称呼.tsv")
+EXTRA = os.path.join(ROOT, "脚本", "对照表", "补充关系.tsv")
 
 NT = {"MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH", "2TH",
       "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD", "REV"}
@@ -85,10 +90,70 @@ def who(pid, ref, label=""):
     return pid
 
 
+def display_names(people, base, override, rows):
+    """同名的人加区分：人工对照表 > 父母（某某之子）> 配偶 > 子女 > 首次出现的书卷章"""
+    book_short = {}
+    for path in glob.glob(os.path.join(USFM, "*.usfm")):
+        head = open(path, encoding="utf-8").read(400)
+        m, t = re.search(r"\\id (\w+)", head), re.search(r"\\toc3 (\S+)", head)
+        if m and t:
+            book_short[m.group(1)] = t.group(1)
+    sex = {p["id"]: p["性别"] for p in people}
+    parent, spouse, child = {}, {}, {}
+    for a, b, t, ref, _ in rows:
+        if t in ("father", "mother"):
+            if t == "father" or b not in parent:
+                parent[b] = a
+            child.setdefault(a, b)
+        elif t in ("son", "daughter"):
+            parent.setdefault(a, b); child.setdefault(b, a)
+        elif t == "husband":
+            spouse.setdefault(b, ("妻", a)); spouse.setdefault(a, ("夫", b))
+        elif t == "wife":
+            spouse.setdefault(a, ("妻", b)); spouse.setdefault(b, ("夫", a))
+    out = {pid: override.get(pid, n) for pid, n in base.items()}
+    groups = defaultdict(list)
+    for p in people:
+        groups[base[p["id"]]].append(p)
+    for name, ps in groups.items():
+        if len(ps) < 2:
+            continue
+        ps.sort(key=lambda p: -p["出现节数"])
+        for k, p in enumerate(ps):
+            pid = p["id"]
+            if pid in override or k == 0 or pid == "Jesus":
+                continue  # 出现最多的那位保留原名
+            if pid in parent and base.get(parent[pid]):
+                q = base[parent[pid]] + ("之女" if sex.get(pid) == "女" else "之子")
+            elif pid in spouse and base.get(spouse[pid][1]):
+                q = base[spouse[pid][1]] + ("的妻子" if spouse[pid][0] == "妻" else "的丈夫")
+            elif pid in child and base.get(child[pid]):
+                q = base[child[pid]] + ("之母" if sex.get(pid) == "女" else "之父")
+            elif p["首次出现"]:
+                b, cv = p["首次出现"].split()
+                q = "首见" + book_short.get(b, b) + cv.split(":")[0]
+            else:
+                continue
+            out[pid] = f"{name}（{q}）"
+    # 还重名的，再补上首次出现
+    seen = defaultdict(list)
+    for p in people:
+        seen[out[p["id"]]].append(p)
+    for n, ps in seen.items():
+        if len(ps) > 1 and "（" in n:
+            for p in ps:
+                if p["首次出现"]:
+                    b, cv = p["首次出现"].split()
+                    out[p["id"]] = n[:-1] + "，首见" + book_short.get(b, b) + cv.split(":")[0] + "）"
+    return out
+
+
 def main():
     people = json.load(open(os.path.join(OUT, "人物.json"), encoding="utf-8"))
     lineage = json.load(open(os.path.join(OUT, "耶稣家谱.json"), encoding="utf-8"))
-    zh = {p["id"]: p["中文名"] or (p["英文称呼"][0] if p["英文称呼"] else p["id"]) for p in people}
+    # 图上显示的名字：人工对照表优先（同名的人加区分、无名的人给称呼）
+    override = {r["人物编号"]: r["图上显示的名字"] for r in csv.DictReader(open(NAMES, encoding="utf-8"), delimiter="\t")}
+    base = {p["id"]: p["中文名"] or override.get(p["id"]) or "无名氏" for p in people}
 
     # ---------- 亲属 / 社会 ----------
     rows = []
@@ -101,6 +166,7 @@ def main():
             continue
         rows.append((a, b, t, ref, r["relationship_category"]))
     have = {(a, b, t) for a, b, t, _, _ in rows}
+    zh = display_names(people, base, override, rows)
 
     rel_edges = {}
     for a, b, t, ref, how in rows:
@@ -141,6 +207,38 @@ def main():
                     co_refs[k].append(ref)
     co_edges = [{"a": a, "b": b, "类别": "同节", "次数": n, "经文": co_refs[(a, b)]} for (a, b), n in co.items()]
 
+    # ---------- 人工补充的关系（脚本/对照表/补充关系.tsv）----------
+    #   原数据的"社会关系"很少（全本只有几十条），审判、同工、师生这类要靠人工补充
+    occ_refs = {p["id"]: set(p["经文"]) for p in people}
+
+    def resolve(token, ref):
+        if token in zh:
+            return token
+        cands = [p["id"] for p in people
+                 if token in (p["中文名"], zh[p["id"]], *p["别名"]) and ref in occ_refs[p["id"]]]
+        if not cands:  # 这节没收这个人，就放宽到同一章
+            ch = ref.rsplit(":", 1)[0] + ":"
+            cands = [p["id"] for p in people
+                     if token in (p["中文名"], zh[p["id"]], *p["别名"]) and any(r.startswith(ch) for r in occ_refs[p["id"]])]
+        return cands[0] if len(cands) == 1 else None
+
+    bad = []
+    for r in csv.DictReader(open(EXTRA, encoding="utf-8"), delimiter="\t"):
+        a, b = resolve(r["甲"], r["经文"]), resolve(r["乙"], r["经文"])
+        if not a or not b:
+            bad.append(f'{r["甲"]} - {r["乙"]}（{r["经文"]}）')
+            continue
+        key = tuple(sorted((a, b)))
+        e = rel_edges.setdefault(key, {"a": key[0], "b": key[1], "类别": r["类别"], "说明": [], "经文": []})
+        if e["类别"] != "亲属":
+            e["类别"] = r["类别"]
+        if r["说明"] not in e["说明"]:
+            e["说明"].insert(0, r["说明"])
+        if r["经文"] not in e["经文"]:
+            e["经文"].insert(0, r["经文"])
+    if bad:
+        print("补充关系里对不上人物的：", bad)
+
     for e in rel_edges.values():
         e.pop("_对称", None)
         # 师徒之间又记了"主人"（耶稣与十二门徒），保留"老师"一句就够了
@@ -160,7 +258,7 @@ def main():
     for p in people:
         known.add(p["id"])
         nodes.append({
-            "id": p["id"], "名": zh[p["id"]], "别名": p["别名"], "性别": p["性别"], "简介": p["简介"],
+            "id": p["id"], "名": zh[p["id"]], "本名": base[p["id"]], "别名": p["别名"], "性别": p["性别"], "简介": p["简介"],
             "可信度": p["可信度"], "节数": p["出现节数"], "首次": p["首次出现"], "书卷": p["书卷"],
             "主线": ("马太" if p["id"] in mt_ids else "") + ("路加" if p["id"] in lk_ids else ""),
         })

@@ -108,7 +108,7 @@
 (() => {
   const D = window.圣经数据;
   const TYPE_COLOR = { 主线: "#f5c542", 亲属: "#5fb6ff", 社会: "#b38cff", 事件: "#43d1a0", 同节: "#8a93a8" };
-  const TYPE_ALPHA = { 主线: 0.95, 亲属: 0.32, 社会: 0.45, 事件: 0.3, 同节: 0.07 };
+  const TYPE_ALPHA = { 主线: 0.95, 亲属: 0.55, 社会: 0.75, 事件: 0.45, 同节: 0.22 };
   const TYPE_NOTE = { 主线: "耶稣家谱", 亲属: "父母、夫妻、兄弟等", 社会: "主仆、师徒、君臣等", 事件: "一起经历同一件事", 同节: "在同一节经文里一起出现" };
 
   // ---------- 数据 ----------
@@ -120,6 +120,7 @@
   const E = D.线.map(r => ({ a: r[0], b: r[1], t: D.类型[r[2]], n: r[3], info: r[4], refs: r[5] }));
   const EV = D.事件.map(r => ({ title: r[0], year: r[1], ref: r[2], ps: r[3] }));
   const jesus = P.find(p => p.name === "耶稣");
+  P.slice().sort((a, b) => b.n - a.n).forEach((p, k) => p.rank = k);
   const adj = P.map(() => []);
   E.forEach((e, k) => { adj[e.a].push(k); adj[e.b].push(k); });
   const evOf = P.map(() => []);
@@ -214,8 +215,9 @@
       if (!any) continue;
       const dim = lit ? 0.25 : 1;
       ctx.strokeStyle = TYPE_COLOR[t];
-      ctx.globalAlpha = TYPE_ALPHA[t] * dim * (t === "同节" ? Math.min(1, 0.5 + k * 2) : 1);
-      ctx.lineWidth = t === "主线" ? Math.max(2, 5 * Math.sqrt(k)) : Math.max(0.6, 1.2 * Math.sqrt(k));
+      // 放大后线更清楚
+      ctx.globalAlpha = Math.min(1, TYPE_ALPHA[t] * dim * (0.7 + Math.min(1.2, k * 1.5)));
+      ctx.lineWidth = t === "主线" ? Math.max(2, 5 * Math.sqrt(k)) : t === "社会" ? Math.max(1, 2 * Math.sqrt(k)) : Math.max(0.7, 1.4 * Math.sqrt(k));
       ctx.stroke();
     }
     if (litEdges) {
@@ -227,8 +229,8 @@
           ctx.moveTo(sx(A.x), sy(A.y)); ctx.lineTo(sx(B.x), sy(B.y)); any = true;
         }
         if (!any) continue;
-        ctx.strokeStyle = TYPE_COLOR[t]; ctx.globalAlpha = t === "同节" ? 0.55 : 0.9;
-        ctx.lineWidth = t === "主线" ? Math.max(2.5, 5 * Math.sqrt(k)) : 1.6;
+        ctx.strokeStyle = TYPE_COLOR[t]; ctx.globalAlpha = t === "同节" ? 0.7 : 0.95;
+        ctx.lineWidth = t === "主线" ? Math.max(2.5, 5 * Math.sqrt(k)) : t === "同节" ? 1.4 : 2.2;
         ctx.stroke();
       }
     }
@@ -252,7 +254,9 @@
         ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
       }
       // 名字：放大到一定程度、或是被点亮的人
-      const show = p.i === sel || (lit ? lit.has(p.i) && (lit.get(p.i) === 1 || r > 5) : r > 7 || (k > 0.9 && r > 3) || k > 1.6);
+      // 名字：出场最多的人在全图里也标出来，越放大标得越多
+      const show = p.i === sel || (lit ? lit.has(p.i) && (lit.get(p.i) === 1 || r > 5)
+        : p.rank < 30 || (p.rank < 120 && k > 0.18) || (p.rank < 400 && k > 0.4) || r > 7 || k > 0.9);
       if (show) labels.push([p, x, y, r, a]);
     }
     ctx.globalAlpha = 1;
@@ -332,6 +336,8 @@
       else if (m.路加 !== undefined) parts.push(`路加福音家谱自耶稣往上第 ${m.路加} 代（路 3）`);
       h += `<div class="meta gold">★ 耶稣家谱主线：${parts.join("；")}</div>`;
     }
+    const hidden = D.类型.filter(t => !on[t]);
+    if (hidden.length) h += `<div class="warn">已隐藏的线：${hidden.join("、")}（点顶部的按钮可以重新显示）</div>`;
     if (p.conf > 0) h += `<div class="warn">这个中文名是根据经文推断的${p.conf === 2 ? "，把握不大" : ""}，可能有误。</div>`;
 
     const relList = (t, title) => {

@@ -51,12 +51,13 @@ MANUAL = {
     "Pharaoh": "法老", "Satan": "撒但", "the devil": "魔鬼", "Devil": "魔鬼",
     "the angel of the LORD": "耶和华的使者", "angel of the LORD": "耶和华的使者",
     "the angel of G-d": "神的使者", "angel of G-d": "神的使者",
+    "Caesar": "凯撒", "Tiberius Caesar": "凯撒",
 }
 # 一律固定的人物
 FIXED = {"YHVH_1": "神", "YHVH_2": "神", "Jesus": "耶稣"}
 MERGE = {"YHVH_2": "YHVH_1"}
 # 主名指定：出现最多的称呼不是大家习惯的叫法时（雅各在经文里更多被称为"以色列"，但那多半指国家）
-MAIN_NAME = {"Jacob_1": "雅各"}
+MAIN_NAME = {"Jacob_1": "雅各", "Mary_2": "马利亚"}  # 抹大拉的马利亚：投票会选成地名"抹大拉"
 SKIP = {"NA"}
 # 不放进人物图的：神（BibleData 里圣灵也记在这个编号下）。耶稣已在前面单独分出来
 EXCLUDE = {"YHVH_1"}
