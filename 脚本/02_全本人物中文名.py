@@ -57,6 +57,8 @@ MERGE = {"YHVH_2": "YHVH_1"}
 # 主名指定：出现最多的称呼不是大家习惯的叫法时（雅各在经文里更多被称为"以色列"，但那多半指国家）
 MAIN_NAME = {"Jacob_1": "雅各"}
 SKIP = {"NA"}
+# 不放进人物图的：神（BibleData 里圣灵也记在这个编号下）。耶稣已在前面单独分出来
+EXCLUDE = {"YHVH_1"}
 
 BOOK_ORDER = []
 
@@ -379,6 +381,8 @@ def main():
             "经文": refs,
         })
 
+    # 神（含圣灵，BibleData 里同一编号）是全书的作者和主角，不放进人物关系图；耶稣保留
+    people_out = [r for r in people_out if r["id"] not in EXCLUDE]
     people_out.sort(key=lambda r: -r["出现节数"])
     os.makedirs(OUT, exist_ok=True)
     json.dump(people_out, open(os.path.join(OUT, "人物.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=0)

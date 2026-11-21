@@ -144,6 +144,9 @@ def main():
     for e in rel_edges.values():
         e.pop("_对称", None)
     edges = list(rel_edges.values()) + co_edges
+    # 只保留两端都是图中人物的线（神不在图里，和神相连的线一并去掉）
+    ids = {p["id"] for p in people} | {x["id"] for x in lineage["路加福音"] if x["id"] != "YHVH_1"}
+    edges = [e for e in edges if e["a"] in ids and e["b"] in ids]
     json.dump(edges, open(os.path.join(OUT, "关系.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=0)
 
     # ---------- 图数据：点 + 线 ----------
@@ -159,11 +162,12 @@ def main():
             "主线": ("马太" if p["id"] in mt_ids else "") + ("路加" if p["id"] in lk_ids else ""),
         })
     for x in lineage["路加福音"]:  # 路 3:36 的该南在 BibleData 里没有
-        if x["id"] not in known:
+        if x["id"] not in known and x["id"] != "YHVH_1":
             nodes.append({"id": x["id"], "名": x["中文名"], "别名": [], "性别": "男", "简介": "路3:36 家谱中的人物",
                           "可信度": "高", "节数": 1, "首次": "LUK 3:36", "书卷": ["LUK"], "主线": "路加"})
             known.add(x["id"])
     main_edges = []
+    lk_ids = [i for i in lk_ids if i != "YHVH_1"]  # 路加家谱末尾"亚当是神的儿子"，神不在图里
     for chain, name in ((mt_ids, "马太"), (lk_ids, "路加")):
         for x, y in zip(chain, chain[1:]):
             main_edges.append({"a": x, "b": y, "类别": "主线", "福音书": name})
