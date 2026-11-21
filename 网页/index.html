@@ -95,6 +95,8 @@
   </div>
   <div class="chips" id="types"></div>
   <button class="plain" id="depth" title="点选一个人时，亮起几层关系">关系：一层</button>
+  <button class="plain on" id="laneCN" title="底部显示中国朝代与君王">中国史</button>
+  <button class="plain on" id="laneWD" title="底部显示世界历史的时期与大事">世界史</button>
   <button class="plain" id="reset">全图</button>
 </header>
 
@@ -139,7 +141,48 @@
   const cv = document.getElementById("map"), ctx = cv.getContext("2d");
   let W = 0, H = 0, dpr = 1;
   const view = { x: 0, y: 0, k: 0.1 };          // 屏幕 = (世界 - view) * k
-  const minX = 0, maxX = D.时期.length * D.带宽;
+  const minX = 0, maxX = D.圣经时期数 * D.带宽;   // "全图"只到圣经时代；往右拖能看到之后的中国史、世界史
+
+  // ---------- 中国史、世界史两条轨道 ----------
+  // 年份 → 横坐标：落在哪个时期，就按年份在那个时期里的位置排
+  function yearX(y) {
+    const T = D.时期;
+    let i = T.findIndex(p => y < p[2]);
+    if (i < 0) i = T.length - 1;
+    const p = T[i], f = Math.max(0, Math.min(1, (y - p[1]) / (p[2] - p[1])));
+    return (i + f) * D.带宽;
+  }
+  const fmtY = y => y < 0 ? "前" + -y : "" + y;
+  const LANES = [
+    { key: "中国", title: "中国", on: true, color: ["#8c4a33", "#7d6327", "#6b3f6e", "#35634f", "#3f5a86"], items: [] },
+    { key: "世界", title: "世界", on: true, color: ["#2d6a78", "#3b5f8f", "#5b5394", "#2f7360", "#7a5a3a"], items: [] },
+  ];
+  {
+    const cn = LANES[0], wd = LANES[1];
+    const dyn = D.中国.filter(r => r[0] !== "君王").map(r => ({ kind: "bar", name: r[1], a: r[2], b: r[3], note: r[5], kids: [] }));
+    D.中国.filter(r => r[0] === "君王").forEach(r => {
+      const d = dyn.find(x => x.name === r[4]);
+      if (d) d.kids.push({ name: r[1], a: r[2], b: r[3], note: r[5] });
+    });
+    cn.items = dyn;
+    wd.items = D.世界.map(r => ({ kind: r[3] == null ? "pt" : "bar", name: r[1], a: r[2], b: r[3] ?? r[2], note: r[4], kids: [] }));
+    const MAXROW = 4;
+    for (const L of LANES) {
+      L.items.forEach((it, n) => { it.x0 = yearX(it.a); it.x1 = yearX(it.b); it.c = L.color[n % L.color.length]; it.kids.forEach(k => { k.x0 = yearX(k.a); k.x1 = yearX(k.b); }); });
+      L.items.sort((p, q) => p.x0 - q.x0 || (q.x1 - q.x0) - (p.x1 - p.x0));
+      const ends = [];
+      for (const it of L.items) {
+        const right = it.kind === "pt" ? it.x0 + 160 : it.x1 + 8;   // 单个事件要给名字留位置
+        let r = ends.findIndex(e => e <= it.x0);
+        if (r < 0) { if (ends.length < MAXROW) { r = ends.length; ends.push(0); } else r = ends.indexOf(Math.min(...ends)); }
+        ends[r] = Math.max(ends[r], right); it.row = r;
+      }
+      L.rows = Math.max(1, ends.length);
+    }
+  }
+  const ROWH = 16, PERIOD_H = 34;
+  const lanesH = () => LANES.reduce((h, L) => h + (L.on ? L.rows * ROWH + 6 : 0), 0);
+  const bottomH = () => PERIOD_H + lanesH();
   let minY = Infinity, maxY = -Infinity;
   P.forEach(p => { minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
 
@@ -153,9 +196,10 @@
     const pad = 70;
     const narrow = W < 720 && x1 - x0 > D.带宽 * 2;
     // 手机竖屏：按高度铺满，从最左边（太初）开始，左右滑动看后面的时期
-    view.k = narrow ? (H - pad * 2 - 140) / (y1 - y0) : Math.min((W - 40) / (x1 - x0), (H - pad * 2 - 30) / (y1 - y0));
+    const avail = H - pad - bottomH() - 20;   // 底部留给时期名和两条历史轨道
+    view.k = narrow ? (avail - 110) / (y1 - y0) : Math.min((W - 40) / (x1 - x0), avail / (y1 - y0));
     view.x = narrow ? x0 - 10 / view.k : (x0 + x1) / 2 - W / 2 / view.k;
-    view.y = (y0 + y1) / 2 - (H / 2 + 10) / view.k;
+    view.y = (y0 + y1) / 2 - (pad + avail / 2) / view.k;
   }
   const sx = x => (x - view.x) * view.k, sy = y => (y - view.y) * view.k;
   const wx = x => x / view.k + view.x, wy = y => y / view.k + view.y;
@@ -187,7 +231,15 @@
   let raf = 0, moving = false, idle = 0;
   function draw() { if (!raf) raf = requestAnimationFrame(render); }
   // 拖动、缩放的过程中画简化版（不画"同节"线、少画名字），停下来 0.2 秒后再画完整版
+  // 不让地图被拖出数据范围太远（否则一片空白）
+  function clampView() {
+    const total = D.时期.length * D.带宽, viewW = W / view.k;
+    view.x = Math.max(-viewW * 0.7, Math.min(total - viewW * 0.3, view.x));
+    const viewH = H / view.k;
+    view.y = Math.max(minY - viewH * 0.8, Math.min(maxY - viewH * 0.2, view.y));
+  }
   function moved() {
+    clampView();
     moving = true; clearTimeout(idle);
     idle = setTimeout(() => { moving = false; draw(); }, 200);
     draw();
@@ -283,7 +335,9 @@
     }
     ctx.globalAlpha = 1;
 
-    // 时期名称（固定在顶部下方）
+    drawLanes();
+
+    // 时期名称（固定在底部）
     ctx.font = '13px -apple-system,"PingFang SC",sans-serif'; ctx.textBaseline = "alphabetic";
     D.时期.forEach((p, i) => {
       const x0 = Math.max(sx(i * D.带宽), 0), x1 = Math.min(sx((i + 1) * D.带宽), W);
@@ -301,6 +355,106 @@
     });
     ctx.strokeStyle = "#263252"; ctx.lineWidth = 1;
     D.时期.forEach((p, i) => { const x = sx(i * D.带宽); ctx.beginPath(); ctx.moveTo(x, H - 34); ctx.lineTo(x, H); ctx.stroke(); });
+  }
+
+  // 两条历史轨道：固定在屏幕底部、时期名上方，横向跟着地图移动和缩放
+  let laneHover = null;
+  function laneLayout() {
+    const out = []; let y = H - bottomH();
+    for (const L of LANES) { if (!L.on) continue; out.push({ L, top: y }); y += L.rows * ROWH + 6; }
+    return out;
+  }
+  function drawLanes() {
+    ctx.textBaseline = "middle";
+    for (const { L, top } of laneLayout()) {
+      const h = L.rows * ROWH + 6;
+      ctx.globalAlpha = 1; ctx.fillStyle = "rgba(8,12,26,0.93)"; ctx.fillRect(0, top, W, h);
+      ctx.fillStyle = "#263252"; ctx.fillRect(0, top, W, 1);
+      for (const it of L.items) {
+        const a = sx(it.x0), b = sx(it.x1);
+        if (b < -200 || a > W + 10) continue;
+        const y = top + 4 + it.row * ROWH;
+        const hot = laneHover && (laneHover.it === it);
+        if (it.kind === "pt") {
+          ctx.fillStyle = hot ? "#fff" : "#e8c37a";
+          ctx.beginPath(); ctx.moveTo(a, y + 3); ctx.lineTo(a + 5, y + 8); ctx.lineTo(a, y + 13); ctx.lineTo(a - 5, y + 8); ctx.fill();
+          ctx.font = '11px -apple-system,"PingFang SC",sans-serif'; ctx.textAlign = "left"; ctx.fillStyle = "#d9dfec";
+          const room = nextStart(L, it) - a - 12;
+          if (room > 24) ctx.fillText(clip(it.name, room), a + 8, y + 8.5);
+          continue;
+        }
+        const w = Math.max(2, b - a);
+        ctx.fillStyle = it.c; ctx.globalAlpha = hot ? 1 : 0.85;
+        ctx.fillRect(a, y, w, ROWH - 3);
+        ctx.globalAlpha = 1;
+        // 放大到朝代足够宽时，显示里面每位君王
+        // 君王平均宽度够写名字时才切换成"君王模式"，否则显示朝代名
+        const kidW = it.kids.reduce((t, k) => t + (k.x1 - k.x0), 0) * view.k / Math.max(1, it.kids.length);
+        const showKids = it.kids.length && kidW > 34;
+        if (showKids) {
+          ctx.font = '11px -apple-system,"PingFang SC",sans-serif'; ctx.textAlign = "center";
+          const firstK = sx(Math.min(...it.kids.map(k => k.x0)));
+          const nameW = ctx.measureText(it.name).width;
+          if (firstK - Math.max(a, 0) > nameW + 8) { ctx.fillStyle = "#fff"; ctx.fillText(it.name, Math.max(a, 0) + nameW / 2 + 4, y + 7); }
+          for (const k of it.kids) {
+            const ka = sx(k.x0), kb = sx(k.x1);
+            if (kb < 0 || ka > W) continue;
+            ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(ka, y, 1, ROWH - 3);
+            if (laneHover && laneHover.kid === k) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(ka, y, kb - ka, ROWH - 3); }
+            const room = kb - ka - 4;
+            if (room > 14) { ctx.fillStyle = "#fff3e0"; ctx.fillText(clip(k.name, room), (Math.max(ka, 0) + Math.min(kb, W)) / 2, y + 7); }
+          }
+        } else {
+          ctx.font = '12px -apple-system,"PingFang SC",sans-serif'; ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+          const vis0 = Math.max(a, 0), vis1 = Math.min(b, W), room = vis1 - vis0 - 6;
+          if (room > 12) ctx.fillText(clip(it.name, room), (vis0 + vis1) / 2, y + 7);
+        }
+      }
+      // 轨道名称贴在左边
+      ctx.font = '600 11px -apple-system,"PingFang SC",sans-serif'; ctx.textAlign = "left";
+      const tw = ctx.measureText(L.title).width + 10;
+      ctx.fillStyle = "rgba(8,12,26,0.95)"; ctx.fillRect(0, top + 1, tw + 4, h - 1);
+      ctx.fillStyle = L.key === "中国" ? "#f0b48a" : "#8fd3e0"; ctx.fillText(L.title, 6, top + h / 2);
+    }
+    ctx.textBaseline = "top";
+  }
+  function nextStart(L, it) {
+    let nx = Infinity;
+    for (const o of L.items) if (o.row === it.row && o.x0 > it.x0) nx = Math.min(nx, sx(o.x0));
+    return nx === Infinity ? W + 400 : nx;
+  }
+  function clip(text, room) {
+    if (ctx.measureText(text).width <= room) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + "…").width > room) t = t.slice(0, -1);
+    return t.length > 1 ? t + "…" : "";
+  }
+  function laneHit(mx, my) {
+    for (const { L, top } of laneLayout()) {
+      const h = L.rows * ROWH + 6;
+      if (my < top || my >= top + h) continue;
+      const row = Math.floor((my - top - 4) / ROWH);
+      let best = null;
+      for (const it of L.items) {
+        if (it.row !== row) continue;
+        const a = sx(it.x0), b = sx(it.x1);
+        if (it.kind === "pt" ? Math.abs(mx - a) < 7 : mx >= a && mx <= Math.max(b, a + 2)) {
+          best = { it };
+          const w = b - a;
+          const kidW = it.kids.reduce((t, k) => t + (k.x1 - k.x0), 0) * view.k / Math.max(1, it.kids.length);
+          if (it.kids.length && kidW > 34) best.kid = it.kids.find(k => mx >= sx(k.x0) && mx <= sx(k.x1)) || null;
+          break;
+        }
+      }
+      return best || { none: true };
+    }
+    return null;
+  }
+  function zoomToYears(x0, x1) {
+    const span = Math.max(x1 - x0, 30), cy = wy((H - bottomH()) / 2);
+    view.k = Math.max(0.03, Math.min(6, (W - 80) / span));
+    view.x = x0 - 40 / view.k; view.y = cy - (H - bottomH()) / 2 / view.k;
+    clampView(); draw();
   }
 
   // ---------- 命中检测 ----------
@@ -447,6 +601,21 @@
       view.x = drag.vx - dx / view.k; view.y = drag.vy - dy / view.k; moved(); return;
     }
     if (moving) return;
+    const tipEl = document.getElementById("tip");
+    const lh = laneHit(e.clientX, e.clientY);
+    if (lh) {
+      const t = lh.kid || (lh.it || null);
+      if ((laneHover && laneHover.it) !== lh.it || (laneHover && laneHover.kid) !== lh.kid) { laneHover = lh; draw(); }
+      if (t) {
+        const yrs = lh.it.kind === "pt" ? fmtY(t.a) : `${fmtY(t.a)}～${fmtY(t.b)}`;
+        tipEl.textContent = `${t.name}　${yrs}${t.note ? "　" + t.note : ""}`;
+        tipEl.style.display = "block";
+        tipEl.style.left = Math.min(e.clientX + 14, W - tipEl.offsetWidth - 8) + "px"; tipEl.style.top = e.clientY - 34 + "px";
+      } else tipEl.style.display = "none";
+      if (hover !== null) { hover = null; draw(); }
+      return;
+    }
+    if (laneHover) { laneHover = null; tipEl.style.display = "none"; draw(); }
     const h = pick(e.clientX, e.clientY);
     if (h !== hover) {
       hover = h; draw();
@@ -459,7 +628,11 @@
   const end = e => {
     pointers.delete(e.pointerId);
     if (pointers.size === 0) {
-      if (drag && !dragged) { const i = pick(e.clientX, e.clientY); select(i, false); verseBox.style.display = "none"; }
+      if (drag && !dragged) {
+        const lh = laneHit(e.clientX, e.clientY);
+        if (lh) { const t = lh.kid || lh.it; if (t) zoomToYears(yearX(t.a) - (lh.it.kind === "pt" ? 60 : 0), yearX(t.b) + (lh.it.kind === "pt" ? 60 : 0)); }
+        else if (e.clientY < H - PERIOD_H) { const i = pick(e.clientX, e.clientY); select(i, false); verseBox.style.display = "none"; }
+      }
       drag = null; cv.classList.remove("dragging");
     } else if (pointers.size === 1) {
       const [a] = [...pointers.values()]; drag = { x: a.x, y: a.y, vx: view.x, vy: view.y };
@@ -476,7 +649,7 @@
   }, { passive: false });
   // 点底部的时期名，放大到那个时期
   cv.addEventListener("dblclick", e => {
-    if (e.clientY < H - 34) return;
+    if (e.clientY < H - PERIOD_H) return;
     const i = Math.floor(wx(e.clientX) / D.带宽);
     if (i >= 0 && i < D.时期.length) { fit(i * D.带宽, (i + 1) * D.带宽, minY, maxY); draw(); }
   });
@@ -493,6 +666,11 @@
   const depthBtn = document.getElementById("depth");
   depthBtn.onclick = () => { depth = depth === 1 ? 2 : 1; depthBtn.textContent = depth === 1 ? "关系：一层" : "关系：两层"; depthBtn.classList.toggle("on", depth === 2); computeLit(); draw(); };
   document.getElementById("reset").onclick = () => { select(null); fit(); draw(); };
+  [["laneCN", 0], ["laneWD", 1]].forEach(([id, n]) => {
+    const b = document.getElementById(id);
+    b.onclick = () => { LANES[n].on = !LANES[n].on; b.classList.toggle("on", LANES[n].on); placeFooter(); draw(); };
+  });
+  function placeFooter() { document.getElementById("foot").style.bottom = bottomH() + 8 + "px"; }
 
   const q = document.getElementById("q"), hits = document.getElementById("hits");
   let hitList = [], hitOn = 0;
@@ -519,7 +697,8 @@
   document.addEventListener("keydown", e => { if (e.key === "Escape") { select(null); verseBox.style.display = "none"; hits.style.display = "none"; } });
 
   document.getElementById("foot").textContent =
-    `${P.length} 位人物 · ${E.length} 条关系 · ${EV.length} 个事件 · 年代为大约（乌雪年表系），仅供排序 · 经文：${D.版本} · 滚轮缩放，拖动平移，双击底部时期名放大`;
+    `${P.length} 位人物 · ${E.length} 条关系 · ${EV.length} 个事件 · 圣经年代为大约（乌雪年表系），与世俗史学的年代不完全一致 · 经文：${D.版本} · 滚轮缩放，拖动平移，往右拖可看到圣经之后的历史`;
+  placeFooter();
 
   // 测速用：在浏览器控制台输入 关系图测速() 可以看到每画一帧要多少毫秒
   window.关系图测速 = (n = 20) => {

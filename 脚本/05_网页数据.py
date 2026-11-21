@@ -24,6 +24,8 @@ OUT = os.path.join(ROOT, "数据")
 WEB = os.path.join(ROOT, "网页")
 USFM = os.path.join(ROOT, "数据源", "和合本", "usfm")
 TITLES = os.path.join(ROOT, "脚本", "对照表", "事件标题.tsv")
+CHINA = os.path.join(ROOT, "脚本", "对照表", "中国朝代.tsv")
+WORLD = os.path.join(ROOT, "脚本", "对照表", "世界历史.tsv")
 
 BAND = 700             # 每个时期的宽度
 STRETCH = 2.6          # 纵向拉开的倍数（让星图在屏幕上不至于压成一条线）
@@ -205,6 +207,12 @@ def main():
         "主线": {"马太": [idx[p] for p in mt if p in idx], "路加": [idx[p] for p in lk if p in idx]},
         "经文": {show(c): bible[c] for c in sorted(need)},
         "版本": "和合本（eBible.org cmn-cu89s）",
+        "圣经时期数": graph.get("圣经时期数", len(periods)),
+        # 中国史：[层级, 名称, 起, 止, 所属, 说明]；世界史：[类型, 名称, 起, 止, 说明]（止为空表示单个事件）
+        "中国": [[r["层级"], r["名称"], int(r["起"]), int(r["止"]), r["所属"], r["说明"]]
+                 for r in csv.DictReader(open(CHINA, encoding="utf-8"), delimiter="\t")],
+        "世界": [[r["类型"], r["名称"], int(r["起"]), int(r["止"]) if r["止"] else None, r["说明"]]
+                 for r in csv.DictReader(open(WORLD, encoding="utf-8"), delimiter="\t")],
     }
     os.makedirs(WEB, exist_ok=True)
     with open(os.path.join(WEB, "数据.js"), "w", encoding="utf-8") as fh:
