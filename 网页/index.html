@@ -121,6 +121,9 @@
   const EV = D.事件.map(r => ({ title: r[0], year: r[1], ref: r[2], ps: r[3] }));
   const jesus = P.find(p => p.name === "耶稣");
   P.slice().sort((a, b) => b.n - a.n).forEach((p, k) => p.rank = k);
+  // 线按类型预先分好组，画的时候不用每类都扫一遍全部 1.2 万条
+  const BY_TYPE = {};
+  E.forEach((e, k) => (BY_TYPE[e.t] = BY_TYPE[e.t] || []).push(k));
   const adj = P.map(() => []);
   E.forEach((e, k) => { adj[e.a].push(k); adj[e.b].push(k); });
   const evOf = P.map(() => []);
@@ -141,7 +144,7 @@
   P.forEach(p => { minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
 
   function resize() {
-    dpr = window.devicePixelRatio || 1;
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);  // 高清屏像素太多会很慢，1.5 倍已足够清楚
     W = window.innerWidth; H = window.innerHeight;
     cv.width = W * dpr; cv.height = H * dpr;
     draw();
@@ -181,8 +184,14 @@
   }
 
   // ---------- 绘制 ----------
-  let raf = 0;
+  let raf = 0, moving = false, idle = 0;
   function draw() { if (!raf) raf = requestAnimationFrame(render); }
+  // 拖动、缩放的过程中画简化版（不画"同节"线、少画名字），停下来 0.2 秒后再画完整版
+  function moved() {
+    moving = true; clearTimeout(idle);
+    idle = setTimeout(() => { moving = false; draw(); }, 200);
+    draw();
+  }
   function render() {
     raf = 0;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -203,10 +212,11 @@
     const order = ["同节", "事件", "社会", "亲属", "主线"];
     for (const t of order) {
       if (!on[t]) continue;
+      if (t === "同节" && (moving || k < 0.12)) continue;  // 拖动中、或缩到很小时不画最密的"同节"线
       ctx.beginPath();
       let any = false;
-      for (let q = 0; q < E.length; q++) {
-        const e = E[q]; if (e.t !== t) continue;
+      for (const q of BY_TYPE[t] || []) {
+        const e = E[q];
         if (litEdges && litEdges.has(q)) continue;   // 亮的线最后画
         const A = P[e.a], B = P[e.b];
         if (!inView(A) && !inView(B)) continue;
@@ -238,27 +248,29 @@
     ctx.globalAlpha = 1;
 
     // 点
-    const labels = [];
+    const labels = [], batches = new Map(), rings = [];
     for (const p of P) {
       if (!inView(p)) continue;
       const x = sx(p.x), y = sy(p.y), r = Math.max(1.2, p.r * Math.sqrt(k) * 1.1);
-      let a = 1;
-      if (lit && !lit.has(p.i)) a = 0.18;
-      ctx.globalAlpha = a;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832);
-      ctx.fillStyle = p.line ? "#f5c542" : p.sex === 2 ? "#f29ac0" : p.sex === 1 ? "#9db4e0" : "#a7adbd";
-      ctx.fill();
-      if (p === jesus) {
-        ctx.globalAlpha = a * 0.35; ctx.beginPath(); ctx.arc(x, y, r * 2.4, 0, 6.2832); ctx.fill();
-      }
-      if (p.i === sel || p.i === hover) {
-        ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
-      }
-      // 名字：放大到一定程度、或是被点亮的人
-      // 名字：出场最多的人在全图里也标出来，越放大标得越多
-      const show = p.i === sel || (lit ? lit.has(p.i) && (lit.get(p.i) === 1 || r > 5)
+      const a = lit && !lit.has(p.i) ? 0.18 : 1;
+      // 同颜色、同透明度的点合成一笔画，比一个个画快很多
+      const color = p.line ? "#f5c542" : p.sex === 2 ? "#f29ac0" : p.sex === 1 ? "#9db4e0" : "#a7adbd";
+      const key = color + a;
+      if (!batches.has(key)) batches.set(key, { color, a, path: new Path2D() });
+      const b = batches.get(key).path; b.moveTo(x + r, y); b.arc(x, y, r, 0, 6.2832);
+      if (p === jesus) rings.push(["glow", x, y, r, a]);
+      if (p.i === sel || p.i === hover) rings.push(["ring", x, y, r]);
+      // 名字：出场最多的人在全图里也标出来，越放大标得越多；拖动中只标少数
+      const show = p.i === sel || (lit ? lit.has(p.i) && (lit.get(p.i) === 1 || r > 5) && (!moving || lit.get(p.i) === 0 || r > 6)
+        : moving ? p.rank < 30 || r > 9
         : p.rank < 30 || (p.rank < 120 && k > 0.18) || (p.rank < 400 && k > 0.4) || r > 7 || k > 0.9);
       if (show) labels.push([p, x, y, r, a]);
+    }
+    for (const { color, a, path } of batches.values()) { ctx.globalAlpha = a; ctx.fillStyle = color; ctx.fill(path); }
+    for (const [kind, x, y, r, a] of rings) {
+      ctx.beginPath();
+      if (kind === "glow") { ctx.globalAlpha = a * 0.35; ctx.fillStyle = "#f5c542"; ctx.arc(x, y, r * 2.4, 0, 6.2832); ctx.fill(); }
+      else { ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.arc(x, y, r, 0, 6.2832); ctx.stroke(); }
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = "center"; ctx.textBaseline = "top";
@@ -404,17 +416,17 @@
     (function step(t) {
       const u = Math.min(1, (t - t0) / 450), e = u * (2 - u);
       view.k = s.k + (k1 - s.k) * e; view.x = s.x + (tx - s.x) * e; view.y = s.y + (ty - s.y) * e;
-      render(); if (u < 1) requestAnimationFrame(step);
+      moving = u < 1; render(); if (u < 1) requestAnimationFrame(step);
     })(t0);
   }
 
   // ---------- 鼠标、触摸 ----------
-  let drag = null, moved = false;
+  let drag = null, dragged = false;
   const pointers = new Map();
   cv.addEventListener("pointerdown", e => {
     cv.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; moved = false;
+    drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; dragged = false;
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       drag.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, wx: wx((a.x + b.x) / 2), wy: wy((a.y + b.y) / 2) };
@@ -427,13 +439,14 @@
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       view.k = Math.max(0.03, Math.min(6, drag.pinch.k * d / drag.pinch.d));
       view.x = drag.pinch.wx - drag.pinch.cx / view.k; view.y = drag.pinch.wy - drag.pinch.cy / view.k;
-      moved = true; draw(); return;
+      dragged = true; moved(); return;
     }
     if (drag && pointers.size === 1) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; cv.classList.add("dragging"); }
-      view.x = drag.vx - dx / view.k; view.y = drag.vy - dy / view.k; draw(); return;
+      if (Math.abs(dx) + Math.abs(dy) > 4) { dragged = true; cv.classList.add("dragging"); }
+      view.x = drag.vx - dx / view.k; view.y = drag.vy - dy / view.k; moved(); return;
     }
+    if (moving) return;
     const h = pick(e.clientX, e.clientY);
     if (h !== hover) {
       hover = h; draw();
@@ -446,7 +459,7 @@
   const end = e => {
     pointers.delete(e.pointerId);
     if (pointers.size === 0) {
-      if (drag && !moved) { const i = pick(e.clientX, e.clientY); select(i, false); verseBox.style.display = "none"; }
+      if (drag && !dragged) { const i = pick(e.clientX, e.clientY); select(i, false); verseBox.style.display = "none"; }
       drag = null; cv.classList.remove("dragging");
     } else if (pointers.size === 1) {
       const [a] = [...pointers.values()]; drag = { x: a.x, y: a.y, vx: view.x, vy: view.y };
@@ -459,7 +472,7 @@
     const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
     const mx = e.clientX, my = e.clientY, x = wx(mx), y = wy(my);
     view.k = Math.max(0.03, Math.min(6, view.k * f));
-    view.x = x - mx / view.k; view.y = y - my / view.k; draw();
+    view.x = x - mx / view.k; view.y = y - my / view.k; moved();
   }, { passive: false });
   // 点底部的时期名，放大到那个时期
   cv.addEventListener("dblclick", e => {
@@ -508,6 +521,11 @@
   document.getElementById("foot").textContent =
     `${P.length} 位人物 · ${E.length} 条关系 · ${EV.length} 个事件 · 年代为大约（乌雪年表系），仅供排序 · 经文：${D.版本} · 滚轮缩放，拖动平移，双击底部时期名放大`;
 
+  // 测速用：在浏览器控制台输入 关系图测速() 可以看到每画一帧要多少毫秒
+  window.关系图测速 = (n = 20) => {
+    const t = m => { moving = m; const t0 = performance.now(); for (let i = 0; i < n; i++) render(); moving = false; return +((performance.now() - t0) / n).toFixed(1); };
+    return { 完整画面毫秒: t(false), 拖动时毫秒: t(true) };
+  };
   window.addEventListener("resize", () => { resize(); render(); });
   resize(); fit(); render();
 })();
