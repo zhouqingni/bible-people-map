@@ -90,6 +90,104 @@ def who(pid, ref, label=""):
     return pid
 
 
+# ---------- 从经文句式提取人物互动 ----------
+# 一节经文里出现"甲 + 动作 + 乙"的句子，就记一条互动。动作写在 ACTIONS 里：
+#   (名称, 匹配甲乙之间文字的正则, 乙后面要接的文字（正则，可空）, 句式)
+ACTIONS = [
+    ("对话", r"(?:就|便|又|也|再|却|乃|遂)?(?:对|向)$", r"^(?:说|问|回答|发誓|讲|宣告)", "{a}对{b}说话"),
+    ("对话", r"(?:就|便|又|也)?(?:问|回答|吩咐|嘱咐|劝)$", r"", "{a}对{b}说话"),
+    ("杀害", r"(?:就|便|又|也|竟)?(?:杀了|杀死|击杀了?|刺死|打死|治死)$", r"", "{a}杀了{b}"),
+    ("杀害", r"(?:想要|要|想|设法|寻索要)(?:杀|害死|击杀)$", r"", "{a}要杀{b}"),
+    ("膏立", r"(?:就|便|又)?膏(?:了)?$", r"", "{a}膏{b}"),
+    ("立王", r"(?:就|便|又)?立(?:了)?$", r"^(?:作|为)(?:王|.{0,4}王)", "{a}立{b}作王"),
+    ("会面", r"(?:去|来|往|进|回|上|下|出)(?:见|朝见|拜见)(?:了)?$|(?:朝见|拜见|迎接|会见)$", r"", "{a}与{b}见面"),
+    ("争战", r"(?:攻击|攻打|追赶|围困|击败|打败)$", r"", "{a}攻击{b}"),
+    ("争战", r"(?:要|去|来|出去|上去)?(?:与|和|同)$", r"^(?:争战|交战|打仗)", "{a}攻击{b}"),
+    ("差遣", r"(?:就|便|又)?(?:差遣|打发|差|派)(?:了|人)?(?:去|往)?$", r"", "{a}差遣{b}"),
+    ("祝福", r"(?:就|便|又)?(?:为)?$", r"^祝福", "{a}为{b}祝福"),
+    ("祝福", r"(?:就|便|又)?祝福$", r"", "{a}为{b}祝福"),
+    ("咒诅", r"(?:就|便|又)?咒诅$", r"", "{a}咒诅{b}"),
+    ("责备", r"(?:就|便|又)?(?:责备|斥责)$", r"", "{a}责备{b}"),
+    ("下拜", r"(?:就|便|又)?(?:向|在)?$", r"^(?:面前)?(?:下拜|叩拜|俯伏)", "{a}向{b}下拜"),
+    ("逃避", r"(?:就|便|又)?(?:逃避|躲避|逃离)$", r"", "{a}逃避{b}"),
+    ("服侍", r"(?:就|便|又)?(?:服侍|伺候|侍立在?)$", r"", "{a}服侍{b}"),
+    ("拯救", r"(?:就|便|又)?(?:救了|拯救|搭救)$", r"", "{a}救了{b}"),
+    ("背叛", r"(?:就|便|又)?(?:背叛|背弃|出卖)$", r"", "{a}背叛了{b}"),
+    ("交手", r"(?:就|便|又)?(?:与|和|同)$", r"^(?:立约|结盟)", "{a}与{b}立约"),
+]
+
+
+# 这些名字在经文里多半指国家、支派，不当作某个人
+NOT_PERSON = {"以色列", "犹大", "以法莲", "便雅悯", "利未", "以东", "摩押", "亚扪", "埃及", "雅各"}
+
+
+def extract_interactions(people, zh):
+    """返回 [(甲编号, 乙编号, 动作名称, 说明, 经文)]"""
+    names_of = {}
+    for p in people:
+        names_of[p["id"]] = {n for n in (p["中文名"], *p["别名"]) if n}
+    in_verse = defaultdict(list)
+    for p in people:
+        for ref in p["经文"]:
+            in_verse[ref].append(p["id"])
+    out = []
+    pn = re.compile(r"\\pn ([^\\]+?)\s*\\pn\*")
+    for path in sorted(glob.glob(os.path.join(USFM, "*.usfm"))):
+        raw = open(path, encoding="utf-8").read()
+        m = re.search(r"\\id (\w+)", raw)
+        if not m:
+            continue
+        book = m.group(1)
+        # 创世记里雅各、犹大、利未等是人；之后多半指支派或国家
+        skip_np = {"以色列"} if book == "GEN" else NOT_PERSON
+        for cm in re.finditer(r"\\c (\d+)\s(.*?)(?=\\c \d+\s|\Z)", raw, re.S):
+            for vm in re.finditer(r"\\v (\d+)(?:-\d+)? (.*?)(?=\\v \d+|\Z)", cm.group(2), re.S):
+                ref = f"{book} {cm.group(1)}:{vm.group(1)}"
+                ids = in_verse.get(ref)
+                if not ids or len(ids) < 2:
+                    continue
+                text = re.sub(r"\\f .*?\\f\*", "", vm.group(2), flags=re.S)
+                text = re.sub(r"\\(?:add|nd|wj|qt|k)\*?\s?", "", text)
+                # 以句为单位（到句号、问号、叹号或引号为止）；逗号不断句，好找回省略的主语
+                for sent in re.split(r"[。！？「」『』]", text):
+                    hits = [h for h in pn.finditer(sent)]
+                    for j, B in enumerate(hits):
+                        if j == 0:
+                            continue
+                        start = max(hits[j - 1].end(), sent.rfind("，", 0, B.start()) + 1, sent.rfind("；", 0, B.start()) + 1)
+                        gap = sent[start:B.start()]
+                        tail = sent[B.end():B.end() + 8]
+                        if "\\" in gap or len(gap) > 12 or "被" in gap or "的" in gap:
+                            continue
+                        if tail.startswith(("人", "族", "支派", "的", "城", "地", "王的")):
+                            continue
+                        gap = re.sub(r"^(?:王|先知|祭司|大祭司|巡抚|元帅|就|便|又)+", "", gap)
+                        action = None
+                        for name, gre, tre, pat in ACTIONS:
+                            if re.search(gre, gap) and (not tre or re.match(tre, tail)):
+                                action = (name, pat); break
+                        if not action:
+                            continue
+                        if B.group(1) in skip_np:
+                            continue
+                        b_ids = [x for x in ids if B.group(1) in names_of[x]]
+                        if len(b_ids) != 1:
+                            continue
+                        # 主语：这一句里第一个人名（不能是"某某的……"、"某某人"、"某某被……"）
+                        a_id = None
+                        for A in hits[:j]:
+                            after = sent[A.end():A.end() + 1]
+                            if after in ("的", "人", "族", "城", "地", "被") or A.group(1) in skip_np:
+                                continue
+                            cand = [x for x in ids if A.group(1) in names_of[x]]
+                            if len(cand) == 1 and cand[0] != b_ids[0]:
+                                a_id = cand[0]
+                            break
+                        if a_id:
+                            out.append((a_id, b_ids[0], action[0], action[1].format(a=zh[a_id], b=zh[b_ids[0]]), ref))
+    return out
+
+
 def display_names(people, base, override, rows):
     """同名的人加区分：人工对照表 > 父母（某某之子）> 配偶 > 子女 > 首次出现的书卷章"""
     book_short = {}
@@ -206,6 +304,17 @@ def main():
                 if len(co_refs[k]) < 5:
                     co_refs[k].append(ref)
     co_edges = [{"a": a, "b": b, "类别": "同节", "次数": n, "经文": co_refs[(a, b)]} for (a, b), n in co.items()]
+
+    # ---------- 经文句式提取的互动 ----------
+    inter = extract_interactions(people, zh)
+    for a, b, name, text, ref in inter:
+        key = tuple(sorted((a, b)))
+        e = rel_edges.setdefault(key, {"a": key[0], "b": key[1], "类别": "社会", "说明": [], "经文": []})
+        if text not in e["说明"]:
+            e["说明"].append(text)
+            if ref not in e["经文"]:
+                e["经文"].append(ref)
+    print(f"经文句式提取的互动 {len(inter)} 处：", dict(Counter(x[2] for x in inter)))
 
     # ---------- 人工补充的关系（脚本/对照表/补充关系.tsv）----------
     #   原数据的"社会关系"很少（全本只有几十条），审判、同工、师生这类要靠人工补充

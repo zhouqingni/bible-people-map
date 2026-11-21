@@ -108,7 +108,7 @@
 (() => {
   const D = window.圣经数据;
   const TYPE_COLOR = { 主线: "#f5c542", 亲属: "#5fb6ff", 社会: "#b38cff", 事件: "#43d1a0", 同节: "#8a93a8" };
-  const TYPE_ALPHA = { 主线: 0.95, 亲属: 0.55, 社会: 0.75, 事件: 0.45, 同节: 0.22 };
+  const TYPE_ALPHA = { 主线: 0.95, 亲属: 0.55, 社会: 0.75, 事件: 0.45, 同节: 0.2 };
   const TYPE_NOTE = { 主线: "耶稣家谱", 亲属: "父母、夫妻、兄弟等", 社会: "主仆、师徒、君臣等", 事件: "一起经历同一件事", 同节: "在同一节经文里一起出现" };
 
   // ---------- 数据 ----------
@@ -216,7 +216,8 @@
       const dim = lit ? 0.25 : 1;
       ctx.strokeStyle = TYPE_COLOR[t];
       // 放大后线更清楚
-      ctx.globalAlpha = Math.min(1, TYPE_ALPHA[t] * dim * (0.7 + Math.min(1.2, k * 1.5)));
+      // 放大后线更清楚；"同节"线最多，放大后不再加亮，免得满屏都是线
+      ctx.globalAlpha = Math.min(1, TYPE_ALPHA[t] * dim * (t === "同节" ? 0.8 : 0.7 + Math.min(1.2, k * 1.5)));
       ctx.lineWidth = t === "主线" ? Math.max(2, 5 * Math.sqrt(k)) : t === "社会" ? Math.max(1, 2 * Math.sqrt(k)) : Math.max(0.7, 1.4 * Math.sqrt(k));
       ctx.stroke();
     }
