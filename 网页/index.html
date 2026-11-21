@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>圣经人物关系图</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: rgba(17, 24, 44, 0.94);
+    --line: #263252;
+    --text: #e6ebf5;
+    --muted: #8f9bb8;
+    --gold: #f5c542;
+    --kin: #5fb6ff;
+    --social: #b38cff;
+    --event: #43d1a0;
+    --co: #8a93a8;
+    --male: #9db4e0;
+    --female: #f29ac0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; overflow: hidden; }
+  #map { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  #map.dragging { cursor: grabbing; }
+
+  header { position: fixed; top: 0; left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 8px 12px;
+    align-items: center; padding: 10px 16px; background: linear-gradient(var(--bg) 60%, transparent); z-index: 5; pointer-events: none; }
+  header > * { pointer-events: auto; }
+  h1 { font-size: 17px; margin: 0 6px 0 0; font-weight: 600; letter-spacing: 1px; }
+  h1 small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .search { position: relative; }
+  .search input { width: 200px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: #121a30; color: var(--text); font-size: 14px; outline: none; }
+  .search input:focus { border-color: var(--gold); }
+  #hits { position: absolute; top: 36px; left: 0; width: 260px; max-height: 340px; overflow: auto; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; display: none; }
+  #hits div { padding: 7px 10px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #1a2340; }
+  #hits div:hover, #hits div.on { background: #1d2848; }
+  #hits small { color: var(--muted); margin-left: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 13px;
+    border: 1px solid var(--line); background: #121a30; color: var(--text); cursor: pointer; user-select: none; }
+  .chip i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .chip.off { opacity: 0.4; }
+  .chip.off i { background: #555 !important; }
+  button.plain { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: #121a30; color: var(--text);
+    font-size: 13px; cursor: pointer; }
+  button.plain.on { border-color: var(--gold); color: var(--gold); }
+
+  #panel { position: fixed; top: 64px; right: 12px; bottom: 44px; width: 340px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px 16px 20px; overflow: auto; z-index: 6; display: none; }
+  #panel h2 { margin: 0; font-size: 22px; }
+  #panel .alias { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  #panel .meta { font-size: 13px; color: #c4cbe0; margin: 10px 0; line-height: 1.7; }
+  #panel h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin: 16px 0 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+  #panel ul { list-style: none; padding: 0; margin: 0; }
+  #panel li { font-size: 14px; line-height: 1.6; padding: 3px 0; }
+  #panel .warn { font-size: 12px; color: #f0b46a; background: rgba(240, 180, 106, 0.1); padding: 6px 8px; border-radius: 6px; margin-top: 8px; }
+  #panel .gold { color: var(--gold); }
+  #close { position: absolute; top: 10px; right: 12px; background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; }
+  a.p { color: #9cc9ff; cursor: pointer; text-decoration: none; }
+  a.p:hover { text-decoration: underline; }
+  a.v { color: var(--muted); cursor: pointer; font-size: 12px; margin-left: 4px; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  a.v:hover { color: var(--text); }
+  .more { color: var(--muted); font-size: 12px; cursor: pointer; }
+
+  #verse { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px));
+    background: #fdf8ec; color: #2b2416; border-radius: 10px; padding: 14px 16px; font-size: 16px; line-height: 1.8; z-index: 9;
+    display: none; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); font-family: "Songti SC", "STSong", serif; }
+  #verse b { display: block; font-family: -apple-system, "PingFang SC", sans-serif; font-size: 13px; color: #8a6d2f; margin-bottom: 4px; }
+
+  #tip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 8px; font-size: 13px; z-index: 8; display: none; white-space: nowrap; }
+  footer { position: fixed; left: 16px; bottom: 42px; font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
+
+  @media (max-width: 720px) {
+    header { padding: 8px 10px; }
+    h1 small { display: none; }
+    .search input { width: 140px; }
+    #panel { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 55%; border-radius: 14px 14px 0 0; }
+    footer { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="map"></canvas>
+
+<header>
+  <h1>圣经人物关系图<small>和合本 · 主线：耶稣家谱</small></h1>
+  <div class="search">
+    <input id="q" placeholder="搜索人名，如 路得" autocomplete="off">
+    <div id="hits"></div>
+  </div>
+  <div class="chips" id="types"></div>
+  <button class="plain" id="depth" title="点选一个人时，亮起几层关系">关系：一层</button>
+  <button class="plain" id="reset">全图</button>
+</header>
+
+<div id="panel"><button id="close" aria-label="关闭">×</button><div id="card"></div></div>
+<div id="verse"></div>
+<div id="tip"></div>
+<footer id="foot"></footer>
+
+<script src="数据.js"></script>
+<script>
+(() => {
+  const D = window.圣经数据;
+  const TYPE_COLOR = { 主线: "#f5c542", 亲属: "#5fb6ff", 社会: "#b38cff", 事件: "#43d1a0", 同节: "#8a93a8" };
+  const TYPE_ALPHA = { 主线: 0.95, 亲属: 0.32, 社会: 0.45, 事件: 0.3, 同节: 0.07 };
+  const TYPE_NOTE = { 主线: "耶稣家谱", 亲属: "父母、夫妻、兄弟等", 社会: "主仆、师徒、君臣等", 事件: "一起经历同一件事", 同节: "在同一节经文里一起出现" };
+
+  // ---------- 数据 ----------
+  const P = D.点.map((r, i) => ({
+    i, name: r[0], x: r[1], y: r[2], n: r[3], sex: r[4], period: r[5], year: r[6], line: r[7], conf: r[8],
+    alias: r[9], first: r[10], books: r[11], yearNote: r[12],
+    r: Math.min(24, 3 + Math.sqrt(r[3]) * 0.9),
+  }));
+  const E = D.线.map(r => ({ a: r[0], b: r[1], t: D.类型[r[2]], n: r[3], info: r[4], refs: r[5] }));
+  const EV = D.事件.map(r => ({ title: r[0], year: r[1], ref: r[2], ps: r[3] }));
+  const jesus = P.find(p => p.name === "耶稣");
+  const adj = P.map(() => []);
+  E.forEach((e, k) => { adj[e.a].push(k); adj[e.b].push(k); });
+  const evOf = P.map(() => []);
+  EV.forEach((ev, k) => ev.ps.forEach(i => evOf[i].push(k)));
+  const mainIndex = {};
+  D.主线.马太.forEach((i, k) => (mainIndex[i] = mainIndex[i] || {}).马太 = k + 1);
+  D.主线.路加.forEach((i, k) => (mainIndex[i] = mainIndex[i] || {}).路加 = k);
+
+  const on = { 主线: true, 亲属: true, 社会: true, 事件: true, 同节: true };
+  let depth = 1;
+
+  // ---------- 画布与视图 ----------
+  const cv = document.getElementById("map"), ctx = cv.getContext("2d");
+  let W = 0, H = 0, dpr = 1;
+  const view = { x: 0, y: 0, k: 0.1 };          // 屏幕 = (世界 - view) * k
+  const minX = 0, maxX = D.时期.length * D.带宽;
+  let minY = Infinity, maxY = -Infinity;
+  P.forEach(p => { minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    draw();
+  }
+  function fit(x0 = minX, x1 = maxX, y0 = minY, y1 = maxY) {
+    const pad = 70;
+    const narrow = W < 720 && x1 - x0 > D.带宽 * 2;
+    // 手机竖屏：按高度铺满，从最左边（太初）开始，左右滑动看后面的时期
+    view.k = narrow ? (H - pad * 2 - 140) / (y1 - y0) : Math.min((W - 40) / (x1 - x0), (H - pad * 2 - 30) / (y1 - y0));
+    view.x = narrow ? x0 - 10 / view.k : (x0 + x1) / 2 - W / 2 / view.k;
+    view.y = (y0 + y1) / 2 - (H / 2 + 10) / view.k;
+  }
+  const sx = x => (x - view.x) * view.k, sy = y => (y - view.y) * view.k;
+  const wx = x => x / view.k + view.x, wy = y => y / view.k + view.y;
+
+  // ---------- 选中与高亮 ----------
+  let sel = null, lit = null, litEdges = null, hover = null;
+  function edgeVisible(e) { return on[e.t]; }
+  function computeLit() {
+    if (sel === null) { lit = litEdges = null; return; }
+    lit = new Map([[sel, 0]]); litEdges = new Set();
+    let frontier = [sel];
+    for (let d = 1; d <= depth; d++) {
+      const next = [];
+      for (const i of frontier) for (const k of adj[i]) {
+        const e = E[k]; if (!edgeVisible(e)) continue;
+        if (d === 1 || lit.get(e.a) < d && lit.get(e.b) < d || true) litEdges.add(k);
+        const j = e.a === i ? e.b : e.a;
+        if (!lit.has(j)) { lit.set(j, d); next.push(j); }
+      }
+      frontier = next;
+    }
+    // 第二层只保留连到第一层的线，避免整片发亮
+    if (depth > 1) for (const k of [...litEdges]) {
+      const e = E[k]; if (!lit.has(e.a) || !lit.has(e.b)) litEdges.delete(k);
+    }
+  }
+
+  // ---------- 绘制 ----------
+  let raf = 0;
+  function draw() { if (!raf) raf = requestAnimationFrame(render); }
+  function render() {
+    raf = 0;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#0b1020"; ctx.fillRect(0, 0, W, H);
+
+    // 时期色带
+    D.时期.forEach((p, i) => {
+      const x0 = sx(i * D.带宽), x1 = sx((i + 1) * D.带宽);
+      if (x1 < 0 || x0 > W) return;
+      ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0)";
+      ctx.fillRect(x0, 0, x1 - x0, H);
+    });
+
+    const k = view.k;
+    const inView = p => { const x = sx(p.x), y = sy(p.y); return x > -60 && x < W + 60 && y > -60 && y < H + 60; };
+
+    // 线：按类型成批画
+    const order = ["同节", "事件", "社会", "亲属", "主线"];
+    for (const t of order) {
+      if (!on[t]) continue;
+      ctx.beginPath();
+      let any = false;
+      for (let q = 0; q < E.length; q++) {
+        const e = E[q]; if (e.t !== t) continue;
+        if (litEdges && litEdges.has(q)) continue;   // 亮的线最后画
+        const A = P[e.a], B = P[e.b];
+        if (!inView(A) && !inView(B)) continue;
+        ctx.moveTo(sx(A.x), sy(A.y)); ctx.lineTo(sx(B.x), sy(B.y)); any = true;
+      }
+      if (!any) continue;
+      const dim = lit ? 0.25 : 1;
+      ctx.strokeStyle = TYPE_COLOR[t];
+      ctx.globalAlpha = TYPE_ALPHA[t] * dim * (t === "同节" ? Math.min(1, 0.5 + k * 2) : 1);
+      ctx.lineWidth = t === "主线" ? Math.max(2, 5 * Math.sqrt(k)) : Math.max(0.6, 1.2 * Math.sqrt(k));
+      ctx.stroke();
+    }
+    if (litEdges) {
+      for (const t of order) {
+        ctx.beginPath(); let any = false;
+        for (const q of litEdges) {
+          const e = E[q]; if (e.t !== t) continue;
+          const A = P[e.a], B = P[e.b];
+          ctx.moveTo(sx(A.x), sy(A.y)); ctx.lineTo(sx(B.x), sy(B.y)); any = true;
+        }
+        if (!any) continue;
+        ctx.strokeStyle = TYPE_COLOR[t]; ctx.globalAlpha = t === "同节" ? 0.55 : 0.9;
+        ctx.lineWidth = t === "主线" ? Math.max(2.5, 5 * Math.sqrt(k)) : 1.6;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // 点
+    const labels = [];
+    for (const p of P) {
+      if (!inView(p)) continue;
+      const x = sx(p.x), y = sy(p.y), r = Math.max(1.2, p.r * Math.sqrt(k) * 1.1);
+      let a = 1;
+      if (lit && !lit.has(p.i)) a = 0.18;
+      ctx.globalAlpha = a;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832);
+      ctx.fillStyle = p.line ? "#f5c542" : p.sex === 2 ? "#f29ac0" : p.sex === 1 ? "#9db4e0" : "#a7adbd";
+      ctx.fill();
+      if (p === jesus) {
+        ctx.globalAlpha = a * 0.35; ctx.beginPath(); ctx.arc(x, y, r * 2.4, 0, 6.2832); ctx.fill();
+      }
+      if (p.i === sel || p.i === hover) {
+        ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+      }
+      // 名字：放大到一定程度、或是被点亮的人
+      const show = p.i === sel || (lit ? lit.has(p.i) && (lit.get(p.i) === 1 || r > 5) : r > 7 || (k > 0.9 && r > 3) || k > 1.6);
+      if (show) labels.push([p, x, y, r, a]);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (const [p, x, y, r, a] of labels) {
+      const big = p.i === sel || p === jesus;
+      ctx.font = (big ? "600 15px " : r > 10 ? "500 13px " : "12px ") + '-apple-system,"PingFang SC",sans-serif';
+      ctx.globalAlpha = Math.max(a, lit && lit.has(p.i) ? 1 : 0);
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(11,16,32,0.9)"; ctx.strokeText(p.name, x, y + r + 2);
+      ctx.fillStyle = p.line ? "#f8d978" : "#dfe5f2"; ctx.fillText(p.name, x, y + r + 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // 时期名称（固定在顶部下方）
+    ctx.font = '13px -apple-system,"PingFang SC",sans-serif'; ctx.textBaseline = "alphabetic";
+    D.时期.forEach((p, i) => {
+      const x0 = Math.max(sx(i * D.带宽), 0), x1 = Math.min(sx((i + 1) * D.带宽), W);
+      if (x1 - x0 < 30) return;
+      const cx = (x0 + x1) / 2, yy = H - 16;
+      ctx.fillStyle = "rgba(11,16,32,0.85)"; ctx.fillRect(sx(i * D.带宽), H - 34, sx((i + 1) * D.带宽) - sx(i * D.带宽), 34);
+      ctx.fillStyle = "#c4cbe0"; ctx.textAlign = "center";
+      const range = (y => y < 0 ? "前" + -y : "" + y);
+      const SHORT = { 洪水之后: "洪水后", 出埃及与旷野: "出埃及", 进迦南与士师: "士师", 被掳与归回: "被掳归回", 两约之间: "两约间", 耶稣在世: "耶稣", 使徒时期: "使徒" };
+      let label = `${p[0]}  ${range(p[1])}～${range(p[2])}`;
+      if (ctx.measureText(label).width > x1 - x0 - 8) label = p[0];
+      if (ctx.measureText(label).width > x1 - x0 - 8) label = SHORT[p[0]] || p[0];
+      if (ctx.measureText(label).width > x1 - x0 - 4) return;
+      ctx.fillText(label, cx, yy);
+    });
+    ctx.strokeStyle = "#263252"; ctx.lineWidth = 1;
+    D.时期.forEach((p, i) => { const x = sx(i * D.带宽); ctx.beginPath(); ctx.moveTo(x, H - 34); ctx.lineTo(x, H); ctx.stroke(); });
+  }
+
+  // ---------- 命中检测 ----------
+  const CELL = 60, grid = new Map();
+  P.forEach(p => { const key = Math.floor(p.x / CELL) + "," + Math.floor(p.y / CELL); (grid.get(key) || grid.set(key, []).get(key)).push(p.i); });
+  function pick(mx, my) {
+    const x = wx(mx), y = wy(my), gx = Math.floor(x / CELL), gy = Math.floor(y / CELL);
+    let best = null, bd = Infinity;
+    const reach = Math.max(1, Math.ceil(14 / view.k / CELL));
+    for (let ox = -reach; ox <= reach; ox++) for (let oy = -reach; oy <= reach; oy++) {
+      for (const i of grid.get((gx + ox) + "," + (gy + oy)) || []) {
+        const p = P[i], d = Math.hypot(sx(p.x) - mx, sy(p.y) - my);
+        const r = Math.max(6, p.r * Math.sqrt(view.k) * 1.1 + 4);
+        if (d < r && d < bd) { bd = d; best = i; }
+      }
+    }
+    return best;
+  }
+
+  // ---------- 资料卡 ----------
+  const card = document.getElementById("card"), panel = document.getElementById("panel");
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pl = i => `<a class="p" data-p="${i}">${esc(P[i].name)}</a>`;
+  const vl = r => r ? `<a class="v" data-v="${esc(r)}">${esc(r)}</a>` : "";
+  function linkNames(text, a, b) {
+    // 关系句子里的两个人名做成可点的链接
+    let s = esc(text);
+    for (const i of [a, b]) s = s.replace(esc(P[i].name), "\u0000" + i + "\u0001");
+    return s.replace(/\u0000(\d+)\u0001/g, (_, i) => pl(+i));
+  }
+  function showCard(i) {
+    const p = P[i];
+    const rel = { 主线: [], 亲属: [], 社会: [], 事件: [], 同节: [] };
+    for (const k of adj[i]) rel[E[k].t].push(k);
+    const periodName = D.时期[p.period][0];
+    let h = `<h2>${esc(p.name)}</h2>`;
+    if (p.alias.length) h += `<div class="alias">又名：${p.alias.map(esc).join("、")}</div>`;
+    h += `<div class="meta">${periodName}${p.yearNote ? "<br>" + esc(p.yearNote) : ""}`;
+    if (p.first) h += `<br>首次出现：${vl(p.first)}`;
+    h += `<br>出现 ${p.n} 节经文${p.books.length ? "，见于" + p.books.slice(0, 6).map(esc).join("、") + (p.books.length > 6 ? " 等" : "") : ""}</div>`;
+    const m = mainIndex[i];
+    if (m) {
+      const parts = [];
+      if (m.马太) parts.push(`马太福音家谱第 ${m.马太} 代（太 1）`);
+      if (m.路加 === 0) parts.push("路加福音家谱的起点（路 3）");
+      else if (m.路加 !== undefined) parts.push(`路加福音家谱自耶稣往上第 ${m.路加} 代（路 3）`);
+      h += `<div class="meta gold">★ 耶稣家谱主线：${parts.join("；")}</div>`;
+    }
+    if (p.conf > 0) h += `<div class="warn">这个中文名是根据经文推断的${p.conf === 2 ? "，把握不大" : ""}，可能有误。</div>`;
+
+    const relList = (t, title) => {
+      if (!rel[t].length) return "";
+      let s = `<h3>${title}（${rel[t].length}）</h3><ul>`;
+      for (const k of rel[t]) {
+        const e = E[k];
+        s += `<li>${e.info.map(x => linkNames(x, e.a, e.b)).join("；")} ${e.refs.slice(0, 2).map(vl).join("")}</li>`;
+      }
+      return s + "</ul>";
+    };
+    h += relList("亲属", "亲属");
+    h += relList("社会", "社会关系");
+    if (evOf[i].length) {
+      h += `<h3>参与的事件（${evOf[i].length}）</h3><ul>`;
+      for (const k of evOf[i].slice().sort((a, b) => (EV[a].year ?? 0) - (EV[b].year ?? 0))) {
+        const ev = EV[k], others = ev.ps.filter(j => j !== i);
+        h += `<li>${esc(ev.title)} ${vl(ev.ref)}${others.length ? `<br><span style="color:var(--muted);font-size:12px">同在：${others.slice(0, 8).map(pl).join("、")}${others.length > 8 ? " 等" : ""}</span>` : ""}</li>`;
+      }
+      h += "</ul>";
+    }
+    if (rel.同节.length) {
+      const list = rel.同节.map(k => E[k]).sort((a, b) => b.n - a.n);
+      h += `<h3>同节出现（${list.length} 人）</h3><ul id="colist">`;
+      list.forEach((e, n) => {
+        const j = e.a === i ? e.b : e.a;
+        h += `<li${n >= 15 ? ' class="hide" style="display:none"' : ""}>${pl(j)} <span style="color:var(--muted);font-size:12px">${e.n} 节</span> ${e.refs.slice(0, 2).map(vl).join("")}</li>`;
+      });
+      h += "</ul>";
+      if (list.length > 15) h += `<div class="more" id="showmore">显示全部 ${list.length} 人</div>`;
+    }
+    card.innerHTML = h;
+    panel.style.display = "block";
+    panel.scrollTop = 0;
+  }
+  card.addEventListener("click", ev => {
+    const a = ev.target.closest("[data-p]"), v = ev.target.closest("[data-v]");
+    if (a) select(+a.dataset.p, true);
+    else if (v) showVerse(v.dataset.v);
+    else if (ev.target.id === "showmore") { card.querySelectorAll(".hide").forEach(li => li.style.display = ""); ev.target.remove(); }
+  });
+  document.getElementById("close").onclick = () => { select(null); };
+
+  const verseBox = document.getElementById("verse");
+  function showVerse(ref) {
+    const t = D.经文[ref];
+    verseBox.innerHTML = `<b>${esc(ref)}</b>${t ? esc(t) : "（这节经文没有收进来）"}`;
+    verseBox.style.display = "block";
+  }
+  verseBox.onclick = () => verseBox.style.display = "none";
+
+  function select(i, fly) {
+    sel = i; computeLit();
+    if (i === null) { panel.style.display = "none"; draw(); return; }
+    showCard(i);
+    if (fly) flyTo(P[i]);
+    draw();
+  }
+  function flyTo(p) {
+    const k1 = Math.max(view.k, 0.9), panelW = W > 720 ? 360 : 0;
+    const tx = p.x - (W - panelW) / 2 / k1, ty = p.y - (H > 720 || W > 720 ? H / 2 : H * 0.25) / k1;
+    const s = { x: view.x, y: view.y, k: view.k }, t0 = performance.now();
+    (function step(t) {
+      const u = Math.min(1, (t - t0) / 450), e = u * (2 - u);
+      view.k = s.k + (k1 - s.k) * e; view.x = s.x + (tx - s.x) * e; view.y = s.y + (ty - s.y) * e;
+      render(); if (u < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+
+  // ---------- 鼠标、触摸 ----------
+  let drag = null, moved = false;
+  const pointers = new Map();
+  cv.addEventListener("pointerdown", e => {
+    cv.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; moved = false;
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      drag.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, wx: wx((a.x + b.x) / 2), wy: wy((a.y + b.y) / 2) };
+    }
+  });
+  cv.addEventListener("pointermove", e => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (drag && drag.pinch && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      view.k = Math.max(0.03, Math.min(6, drag.pinch.k * d / drag.pinch.d));
+      view.x = drag.pinch.wx - drag.pinch.cx / view.k; view.y = drag.pinch.wy - drag.pinch.cy / view.k;
+      moved = true; draw(); return;
+    }
+    if (drag && pointers.size === 1) {
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; cv.classList.add("dragging"); }
+      view.x = drag.vx - dx / view.k; view.y = drag.vy - dy / view.k; draw(); return;
+    }
+    const h = pick(e.clientX, e.clientY);
+    if (h !== hover) {
+      hover = h; draw();
+      const tip = document.getElementById("tip");
+      if (h === null) tip.style.display = "none";
+      else { const p = P[h]; tip.textContent = `${p.name} · ${D.时期[p.period][0]}`; tip.style.display = "block"; }
+    }
+    if (hover !== null) { const tip = document.getElementById("tip"); tip.style.left = e.clientX + 14 + "px"; tip.style.top = e.clientY + 12 + "px"; }
+  });
+  const end = e => {
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0) {
+      if (drag && !moved) { const i = pick(e.clientX, e.clientY); select(i, false); verseBox.style.display = "none"; }
+      drag = null; cv.classList.remove("dragging");
+    } else if (pointers.size === 1) {
+      const [a] = [...pointers.values()]; drag = { x: a.x, y: a.y, vx: view.x, vy: view.y };
+    }
+  };
+  cv.addEventListener("pointerup", end);
+  cv.addEventListener("pointercancel", end);
+  cv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
+    const mx = e.clientX, my = e.clientY, x = wx(mx), y = wy(my);
+    view.k = Math.max(0.03, Math.min(6, view.k * f));
+    view.x = x - mx / view.k; view.y = y - my / view.k; draw();
+  }, { passive: false });
+  // 点底部的时期名，放大到那个时期
+  cv.addEventListener("dblclick", e => {
+    if (e.clientY < H - 34) return;
+    const i = Math.floor(wx(e.clientX) / D.带宽);
+    if (i >= 0 && i < D.时期.length) { fit(i * D.带宽, (i + 1) * D.带宽, minY, maxY); draw(); }
+  });
+
+  // ---------- 顶部控件 ----------
+  const types = document.getElementById("types");
+  D.类型.forEach(t => {
+    const c = document.createElement("button");
+    c.className = "chip"; c.title = TYPE_NOTE[t]; c.type = "button";
+    c.innerHTML = `<i style="background:${TYPE_COLOR[t]}"></i>${t}`;
+    c.onclick = () => { on[t] = !on[t]; c.classList.toggle("off", !on[t]); computeLit(); if (sel !== null) showCard(sel); draw(); };
+    types.appendChild(c);
+  });
+  const depthBtn = document.getElementById("depth");
+  depthBtn.onclick = () => { depth = depth === 1 ? 2 : 1; depthBtn.textContent = depth === 1 ? "关系：一层" : "关系：两层"; depthBtn.classList.toggle("on", depth === 2); computeLit(); draw(); };
+  document.getElementById("reset").onclick = () => { select(null); fit(); draw(); };
+
+  const q = document.getElementById("q"), hits = document.getElementById("hits");
+  let hitList = [], hitOn = 0;
+  q.addEventListener("input", () => {
+    const s = q.value.trim();
+    if (!s) { hits.style.display = "none"; return; }
+    hitList = P.filter(p => p.name.includes(s) || p.alias.some(a => a.includes(s)))
+      .sort((a, b) => (b.name === s) - (a.name === s) || b.n - a.n).slice(0, 30);
+    hitOn = 0;
+    hits.innerHTML = hitList.length ? hitList.map((p, k) =>
+      `<div data-i="${p.i}" class="${k ? "" : "on"}">${esc(p.name)}<small>${D.时期[p.period][0]} · ${p.n} 节${p.alias.length && !p.name.includes(s) ? " · 又名" + esc(p.alias.find(a => a.includes(s))) : ""}</small></div>`).join("")
+      : `<div style="color:var(--muted)">没有找到</div>`;
+    hits.style.display = "block";
+  });
+  q.addEventListener("keydown", e => {
+    if (!hitList.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      hitOn = (hitOn + (e.key === "ArrowDown" ? 1 : hitList.length - 1)) % hitList.length;
+      [...hits.children].forEach((d, k) => d.classList.toggle("on", k === hitOn)); e.preventDefault();
+    } else if (e.key === "Enter") { choose(hitList[hitOn].i); }
+  });
+  hits.addEventListener("click", e => { const d = e.target.closest("[data-i]"); if (d) choose(+d.dataset.i); });
+  function choose(i) { hits.style.display = "none"; q.blur(); select(i, true); }
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { select(null); verseBox.style.display = "none"; hits.style.display = "none"; } });
+
+  document.getElementById("foot").textContent =
+    `${P.length} 位人物 · ${E.length} 条关系 · ${EV.length} 个事件 · 年代为大约（乌雪年表系），仅供排序 · 经文：${D.版本} · 滚轮缩放，拖动平移，双击底部时期名放大`;
+
+  window.addEventListener("resize", () => { resize(); render(); });
+  resize(); fit(); render();
+})();
+</script>
+</body>
+</html>

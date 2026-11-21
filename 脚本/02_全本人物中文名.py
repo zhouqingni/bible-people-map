@@ -20,6 +20,7 @@
   数据/地点名.json      和合本里被判定为地名的名字（供后续脚本排除用）
   数据/人名核对表.csv   可信度为中、低的人物，按出现次数排序
 
+需要先运行：01_整理耶稣家谱.py
 运行：python3 -I 脚本/02_全本人物中文名.py
 """
 import csv
@@ -380,6 +381,16 @@ def main():
             "书卷": books,
             "经文": refs,
         })
+
+    # 耶稣家谱上的人，01 脚本已经逐字对照过经文，以它为准
+    lineage = json.load(open(os.path.join(OUT, "耶稣家谱.json"), encoding="utf-8"))
+    exact = {x["id"]: x["中文名"] for x in lineage["马太福音"] + lineage["路加福音"]}
+    for r in people_out:
+        if r["id"] in exact and r["id"] not in FIXED:
+            if r["中文名"] != exact[r["id"]] and r["中文名"] and r["中文名"] not in r["别名"]:
+                r["别名"] = [a for a in r["别名"] if a != exact[r["id"]]]
+            r["中文名"], r["可信度"], r["依据"] = exact[r["id"]], "高", "耶稣家谱逐字对照（01 脚本）"
+            r["别名"] = [a for a in r["别名"] if a != r["中文名"]]
 
     # 神（含圣灵，BibleData 里同一编号）是全书的作者和主角，不放进人物关系图；耶稣保留
     people_out = [r for r in people_out if r["id"] not in EXCLUDE]

@@ -111,6 +111,13 @@ def main():
         if x["fields"].get("yearNum") is not None:
             verse_year[ref] = x["fields"]["yearNum"]
 
+    book_pos = {c: i for i, c in enumerate(usfm_code)}
+
+    def vorder(ref):
+        b, cv = ref.split()
+        c, v = cv.split(":")
+        return (book_pos.get(b, 99), int(c), int(v.split("-")[0]))
+
     # 书卷中位年份（兜底用）
     by_book = defaultdict(list)
     for ref, y in verse_year.items():
@@ -132,6 +139,8 @@ def main():
     for pid, refs in occ.items():
         for ref in refs:
             bd_by_verse[ref].add(pid)
+    people = json.load(open(os.path.join(OUT, "人物.json"), encoding="utf-8"))
+    en_names = {p["id"]: {p["英文名"].lower(), *[l.lower() for l in p["英文称呼"]]} for p in people}
     theo_to_bd = {}
     theo_people = json.load(open(os.path.join(THEO, "people.json")))
     for x in theo_people:
@@ -143,18 +152,23 @@ def main():
         for ref in refs:
             for pid in bd_by_verse[ref]:
                 cand[pid] += 1
-        if f.get("personLookup", "").startswith("jesus_"):
+        look = f.get("personLookup", "")
+        if look.startswith(("god_", "holy_spirit_")):
+            continue  # 神、圣灵不在图里
+        if look == "jesus_905":
             theo_to_bd[x["id"]] = "Jesus"; continue
-        best = None
-        for pid, n in cand.most_common(5):
-            if pid == "YHVH_1":
-                continue
-            same_name = f["name"].lower() == (nodes.get(pid, {}).get("英文") or pid.rsplit("_", 1)[0]).lower()
-            score = n / min(len(refs), len(occ[pid])) + (0.3 if same_name else 0)
-            if score >= 0.6 and (best is None or score > best[0]):
-                best = (score, pid)
-        if best:
-            theo_to_bd[x["id"]] = best[1]
+        # 先在"英文名相同"的人里找经文重合最多的；没有同名的，才看经文重合度（要很高）
+        tname = f["name"].lower()
+        same = [(n, pid) for pid, n in cand.items() if tname in en_names.get(pid, ())]
+        if same:
+            n, pid = max(same)
+            if n / min(len(refs), len(occ[pid])) >= 0.3:
+                theo_to_bd[x["id"]] = pid
+            continue
+        for pid, n in cand.most_common(3):
+            if n / min(len(refs), len(occ[pid])) >= 0.9 and n >= 3:
+                theo_to_bd[x["id"]] = pid
+                break
 
     # ---------- 年代 ----------
     year, source = {}, {}
@@ -171,11 +185,18 @@ def main():
         # 取壮年：30 岁以后、去世前 40 年内（摩西 80 岁才领百姓出埃及）；洪水前的长寿者取中点
         year[pid] = (b + d) // 2 if d - b > 150 else max(b + 30, d - 40)
         source[pid] = f"生卒年（约 {b}～{d}）"
-    # 2. 经文年代
+    # 2. 经文年代（有生卒年的人也算一次：经文年代比生卒年早 100 年以上时，以经文年代为准。
+    #    例如路得：原数据的出生年是公元前 1114 年，但路得记的经文年代是公元前 1306 年，属士师时期）
     for pid, refs in occ.items():
-        if pid in year or pid in NO_YEAR:
+        if pid in NO_YEAR:
             continue
         ys = sorted(verse_year[r] for r in refs if r in verse_year and not is_genealogy(r))
+        if pid in year:
+            # 只往早处修：名字同时是支派名的人（吕便、迦得……）会在后来的经文里被提到，不能往晚处修
+            if len(ys) >= 3 and year[pid] - ys[len(ys) // 4] > 100:
+                year[pid] = ys[len(ys) // 4]
+                source[pid] = f"出现经文的年代（{len(ys)} 节；原数据的生卒年与经文年代相差过大，未采用）"
+            continue
         if ys:
             # 取第 25 百分位：既不被预言里提前点名拉得太早（以赛亚书提到古列），也不被后人追述拉得太晚
             year[pid] = ys[len(ys) // 4] if len(ys) >= 4 else ys[0]
@@ -245,6 +266,9 @@ def main():
         except ValueError:
             y = None
         if refs:
+            # 取多数经文所在书卷里最靠前的一节（原数据偶有混进别卷的经文）
+            main_book = Counter(r.split()[0] for r in refs).most_common(1)[0][0]
+            refs = sorted((r for r in refs if r.split()[0] == main_book), key=vorder)
             b, cv = refs[0].split()
             where = f"{zh_book.get(b, b)} {cv}"
         else:

@@ -143,6 +143,9 @@ def main():
 
     for e in rel_edges.values():
         e.pop("_对称", None)
+        # 师徒之间又记了"主人"（耶稣与十二门徒），保留"老师"一句就够了
+        if any("的老师" in x for x in e["说明"]):
+            e["说明"] = [x for x in e["说明"] if "的主人" not in x]
     edges = list(rel_edges.values()) + co_edges
     # 只保留两端都是图中人物的线（神不在图里，和神相连的线一并去掉）
     ids = {p["id"] for p in people} | {x["id"] for x in lineage["路加福音"] if x["id"] != "YHVH_1"}
